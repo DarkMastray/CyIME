@@ -92,7 +92,7 @@ object BackupManager {
             items.filter { !it.sensitive && (includeHistory || it.isPinned || inGroup(it)) }, includePinned = true)
 
     /** 本机要备份的剪贴板记录，写成 JSON；没有可带的或读不到时为 null（不影响其余备份）。 */
-    private fun clipboardBackupJson(context: Context, includeHistory: Boolean): String? = runCatching {
+    internal fun clipboardBackupJson(context: Context, includeHistory: Boolean): String? = runCatching {
         val groups = com.kingzcheung.xime.clipboard.ClipboardGroupStore.getInstance(context).state.value
         val all = kotlinx.coroutines.runBlocking {
             com.kingzcheung.xime.clipboard.ClipboardManager.getInstance(context).exportItems()

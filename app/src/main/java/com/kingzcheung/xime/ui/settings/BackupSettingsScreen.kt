@@ -1,20 +1,29 @@
 package com.kingzcheung.xime.ui.settings
 
+import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.twotone.ContentPaste
 import androidx.compose.material.icons.twotone.Download
+import androidx.compose.material.icons.twotone.Folder
+import androidx.compose.material.icons.twotone.History
 import androidx.compose.material.icons.twotone.Person
+import androidx.compose.material.icons.twotone.Schedule
+import androidx.compose.material.icons.twotone.Today
 import androidx.compose.material.icons.twotone.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -24,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,10 +45,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kingzcheung.xime.settings.BackupManager
+import com.kingzcheung.xime.settings.ScheduledBackupManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,6 +77,35 @@ fun BackupSettingsContent(onBack: () -> Unit) {
     val busy = busyOp != null
     var message by remember { mutableStateOf<String?>(null) }
     var pendingImport by remember { mutableStateOf<ByteArray?>(null) }
+
+    // 定时自动备份状态
+    var autoBackupEnabled by remember { mutableStateOf(ScheduledBackupManager.isEnabled(context)) }
+    var folderDisplayName by remember { mutableStateOf(ScheduledBackupManager.getFolderDisplayName(context)) }
+    var folderUri by remember { mutableStateOf(ScheduledBackupManager.getFolderUri(context)) }
+    var intervalDays by remember { mutableStateOf(ScheduledBackupManager.getIntervalDays(context)) }
+    var maxKeep by remember { mutableStateOf(ScheduledBackupManager.getMaxKeep(context)) }
+    var lastBackupTime by remember { mutableStateOf(ScheduledBackupManager.getLastBackupTime(context)) }
+    var lastStatus by remember { mutableStateOf(ScheduledBackupManager.getLastStatus(context)) }
+    var lastError by remember { mutableStateOf(ScheduledBackupManager.getLastError(context)) }
+
+    var showIntervalDialog by remember { mutableStateOf(false) }
+    var showMaxKeepDialog by remember { mutableStateOf(false) }
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching {
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+        }
+        val docId = DocumentsContract.getTreeDocumentId(uri)
+        val name = docId.substringAfter(":", docId)
+        ScheduledBackupManager.setFolder(context, uri, name)
+        folderUri = uri
+        folderDisplayName = name
+        lastError = null
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip")
@@ -121,6 +163,86 @@ fun BackupSettingsContent(onBack: () -> Unit) {
         )
     }
 
+    if (showIntervalDialog) {
+        val intervals = listOf(1 to "每天", 3 to "每 3 天", 7 to "每周")
+        AlertDialog(
+            onDismissRequest = { showIntervalDialog = false },
+            title = { Text("选择备份周期") },
+            text = {
+                Column {
+                    intervals.forEach { (days, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    intervalDays = days
+                                    ScheduledBackupManager.setIntervalDays(context, days)
+                                    showIntervalDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = intervalDays == days,
+                                onClick = {
+                                    intervalDays = days
+                                    ScheduledBackupManager.setIntervalDays(context, days)
+                                    showIntervalDialog = false
+                                }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(label, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showIntervalDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
+    if (showMaxKeepDialog) {
+        val options = listOf(3 to "保留最近 3 份", 5 to "保留最近 5 份（推荐）", 10 to "保留最近 10 份", 20 to "保留最近 20 份")
+        AlertDialog(
+            onDismissRequest = { showMaxKeepDialog = false },
+            title = { Text("选择最多保留份数") },
+            text = {
+                Column {
+                    options.forEach { (count, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    maxKeep = count
+                                    ScheduledBackupManager.setMaxKeep(context, count)
+                                    showMaxKeepDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = maxKeep == count,
+                                onClick = {
+                                    maxKeep = count
+                                    ScheduledBackupManager.setMaxKeep(context, count)
+                                    showMaxKeepDialog = false
+                                }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(label, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showMaxKeepDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
@@ -173,6 +295,98 @@ fun BackupSettingsContent(onBack: () -> Unit) {
                         color = MaterialTheme.colorScheme.outline,
                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
                     )
+                }
+            )
+
+            SettingsSection(
+                title = "定时自动备份",
+                content = {
+                    SettingsToggleItem(
+                        icon = Icons.TwoTone.Schedule,
+                        title = "定时自动备份",
+                        subtitle = "按设定周期自动备份到本地授权文件夹",
+                        checked = autoBackupEnabled,
+                        onCheckedChange = {
+                            autoBackupEnabled = it
+                            ScheduledBackupManager.setEnabled(context, it)
+                            if (it && folderUri == null) {
+                                folderPickerLauncher.launch(null)
+                            }
+                        }
+                    )
+                    if (autoBackupEnabled) {
+                        SettingsItem(
+                            icon = Icons.TwoTone.Folder,
+                            title = "备份文件夹",
+                            subtitle = if (folderDisplayName.isNotBlank()) folderDisplayName else "未设置，点击选择本地保存目录",
+                            status = if (folderDisplayName.isNotBlank()) "已设置" else "未设置",
+                            statusTone = if (folderDisplayName.isNotBlank()) SettingsStatusTone.OK else SettingsStatusTone.WARNING,
+                            onClick = { folderPickerLauncher.launch(folderUri) },
+                            showArrow = true
+                        )
+                        SettingsItem(
+                            icon = Icons.TwoTone.Today,
+                            title = "备份周期",
+                            subtitle = "每 $intervalDays 天自动备份一次",
+                            status = when (intervalDays) {
+                                1 -> "每天"
+                                7 -> "每周"
+                                else -> "每${intervalDays}天"
+                            },
+                            onClick = { showIntervalDialog = true },
+                            showArrow = true
+                        )
+                        SettingsItem(
+                            icon = Icons.TwoTone.History,
+                            title = "最多保留份数",
+                            subtitle = "多于此数量时自动清理较早的旧备份",
+                            status = "${maxKeep}份",
+                            onClick = { showMaxKeepDialog = true },
+                            showArrow = true
+                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (lastBackupTime > 0L || !lastError.isNullOrBlank()) {
+                                val timeText = if (lastBackupTime > 0L) {
+                                    SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(lastBackupTime))
+                                } else "尚未备份"
+                                val statusDesc = if (!lastError.isNullOrBlank()) "失败：$lastError" else lastStatus.ifBlank { "成功" }
+                                Text(
+                                    text = "上次自动备份：$timeText ($statusDesc)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (!lastError.isNullOrBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    busyOp = "auto_backup_now"
+                                    message = null
+                                    scope.launch {
+                                        val result = ScheduledBackupManager.performBackup(context, manual = true)
+                                        busyOp = null
+                                        lastBackupTime = ScheduledBackupManager.getLastBackupTime(context)
+                                        lastStatus = ScheduledBackupManager.getLastStatus(context)
+                                        lastError = ScheduledBackupManager.getLastError(context)
+                                        message = result.fold(
+                                            onSuccess = { "已备份到文件夹（$it 个文件）" },
+                                            onFailure = { "备份失败：${it.message ?: "未知错误"}" }
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = !busy && folderUri != null
+                            ) {
+                                BusyIcon(busyOp == "auto_backup_now") {
+                                    Icon(Icons.TwoTone.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
+                                }
+                                Text("立即备份到该文件夹", modifier = Modifier.padding(start = 6.dp))
+                            }
+                        }
+                    }
                 }
             )
 

@@ -366,6 +366,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
+        <!-- 定时自动备份服务（JobScheduler 调度） -->
+        <service
+            android:name="com.kingzcheung.xime.settings.ScheduledBackupJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
         <!-- 下拉快捷开关里的“字幕” -->
         <service android:name="com.kingzcheung.xime.ui.caption.CaptionTileService"
             android:exported="true" android:label="字幕" android:icon="@drawable/caption_launcher_foreground"
