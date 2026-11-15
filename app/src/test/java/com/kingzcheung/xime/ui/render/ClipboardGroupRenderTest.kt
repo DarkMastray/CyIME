@@ -73,6 +73,13 @@ class ClipboardGroupRenderTest {
         hidden = setOf(ClipboardFilter.EMAIL),
     )
 
+    @org.junit.Before fun clear() {
+        val store = ClipboardGroupStore.getInstance(androidx.test.core.app.ApplicationProvider.getApplicationContext())
+        store.state.value.groups.forEach { store.delete(it.id) }
+        store.takeKeyboardEntry()
+        store.takeAddTarget()
+    }
+
     @Test fun dragGroupAheadOfTextThenRenameAndDeleteByButton() {
         val store = ClipboardGroupStore.getInstance(rule.activity)
         store.add("收藏", listOf("text:7"))

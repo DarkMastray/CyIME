@@ -90,6 +90,9 @@ android {
         unitTests.isReturnDefaultValues = true
         // Robolectric 渲染测试（如候选栏两端按钮对比图）需要真实资源与 assets。
         unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            maxHeapSize = "3072m"
+        }
     }
 
     defaultConfig {
