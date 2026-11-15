@@ -68,6 +68,25 @@ val prepareJapaneseDictionaries by tasks.registering {
         retiredRoot.deleteRecursively()
         if (zip.isFile && version.isFile && version.readText() == azooKeyMergedDictionaryHash) return@doLast
         targetRoot.mkdirs()
+        val prebuiltZipName = "japanese-dictionary-${azooKeyMergedDictionaryHash.take(8)}.zip"
+        val prebuiltPending = File(targetRoot, "$prebuiltZipName.download")
+        val prebuiltUrls = listOf(
+            "https://github.com/Cyletix/CyIME/releases/download/models/$prebuiltZipName",
+            "https://www.modelscope.cn/models/Cyletix/cyime-model/resolve/master/$prebuiltZipName"
+        )
+        var fetchedPrebuilt = false
+        try {
+            fetchedPrebuilt = prebuiltUrls.any { url ->
+                runCatching { download(url, prebuiltPending, "prebuilt merged azooKey dictionary") }.isSuccess
+            }
+            if (fetchedPrebuilt) {
+                java.nio.file.Files.move(prebuiltPending.toPath(), zip.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                version.writeText(azooKeyMergedDictionaryHash)
+                return@doLast
+            }
+        } finally {
+            prebuiltPending.delete()
+        }
         val archive = File(targetRoot, "upstream.zip.download")
         try {
             download("https://github.com/ensan-hcl/azooKey_dictionary_storage/archive/$azooKeyDictionaryCommit.zip",
@@ -162,17 +181,50 @@ val prepareAzooKeyLibraries by tasks.registering {
                 return@forEach
             }
             val pending = File(target.parentFile, "$name.download")
+            var fetched = false
             try {
                 val urls = listOf("https://github.com/Cyletix/CyIME/releases/download/models/$name",
                     "https://www.modelscope.cn/models/Cyletix/cyime-model/resolve/master/$name")
-                val fetched = urls.any { url ->
+                fetched = urls.any { url ->
                     runCatching { download(url, pending, "azooKey library $abi") }.isSuccess &&
                         sha256(pending) == hash
                 }
-                check(fetched) { "azooKey library $abi unavailable or SHA-256 mismatch: $name" }
-                java.nio.file.Files.move(pending.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                if (fetched) {
+                    java.nio.file.Files.move(pending.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                    return@forEach
+                }
             } finally {
                 pending.delete()
+            }
+            val tarName = "japanese-engine-azookey-${hash.take(8)}-$abi.tar.bz2"
+            val tarPending = File(target.parentFile, "$tarName.download")
+            try {
+                val tarUrls = listOf(
+                    "https://github.com/Cyletix/CyIME/releases/download/models/$tarName",
+                    "https://www.modelscope.cn/models/Cyletix/cyime-model/resolve/master/$tarName"
+                )
+                val fetchedTar = tarUrls.any { url ->
+                    runCatching { download(url, tarPending, "azooKey tar archive $abi") }.isSuccess
+                }
+                check(fetchedTar) { "azooKey library $abi unavailable: neither $name nor $tarName found" }
+                val tempExtractDir = File(target.parentFile, "tmp-extract-$abi")
+                tempExtractDir.mkdirs()
+                try {
+                    val process = ProcessBuilder("tar", "-xjf", tarPending.absolutePath, "-C", tempExtractDir.absolutePath)
+                        .redirectErrorStream(true)
+                        .start()
+                    val output = process.inputStream.bufferedReader().readText()
+                    val code = process.waitFor()
+                    check(code == 0) { "Failed to extract $tarName: $output" }
+                    val extractedSo = tempExtractDir.walkTopDown().firstOrNull { it.isFile && it.name == "libCyAzooKey.so" }
+                    check(extractedSo != null) { "libCyAzooKey.so not found in $tarName" }
+                    check(sha256(extractedSo) == hash) { "SHA-256 mismatch for extracted libCyAzooKey.so in $abi" }
+                    java.nio.file.Files.move(extractedSo.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                } finally {
+                    tempExtractDir.deleteRecursively()
+                }
+            } finally {
+                tarPending.delete()
             }
         }
     }
